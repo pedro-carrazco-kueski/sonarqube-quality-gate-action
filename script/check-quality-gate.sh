@@ -7,6 +7,11 @@ if [[ -z "${SONAR_TOKEN}" ]]; then
   exit 1
 fi
 
+if [[ -z "${SONAR_PROJECT_KEY}" ]]; then
+  echo "Set the SONAR_PROJECT_KEY env variable."
+  exit 1
+fi
+
 metadataFile="$1"
 pollingTimeoutSec="$2"
 
@@ -61,7 +66,8 @@ fi
 
 analysisId="$(jq -r '.task.analysisId' <<< "${task}")"
 qualityGateUrl="${serverUrl}/api/qualitygates/project_status?analysisId=${analysisId}"
-qualityGateStatus="$(curl --location --location-trusted --max-redirs 10 --silent --fail --show-error --user "${SONAR_TOKEN}": "${qualityGateUrl}" | jq -r '.projectStatus.status')"
+qualityGateResponse="$(curl --location --location-trusted --max-redirs 10 --silent --fail --show-error --user "${SONAR_TOKEN}": "${qualityGateUrl}")"
+qualityGateStatus="$(echo $qualityGateResponse | jq -r '.projectStatus.status')"
 
 dashboardUrl="$(sed -n 's/dashboardUrl=\(.*\)/\1/p' "${metadataFile}")"
 analysisResultMsg="Detailed information can be found at: ${dashboardUrl}\n"
@@ -74,9 +80,11 @@ elif [[ ${qualityGateStatus} == "WARN" ]]; then
    warn "Warnings on Quality Gate.${reset}\n\n${analysisResultMsg}"
 elif [[ ${qualityGateStatus} == "ERROR" ]]; then
    set_output "quality-gate-status" "FAILED"
+
+   minified_report=$(echo $qualityGateResponse | jq -c '.projectStatus.conditions' | sed 's/"/\\\"/g')
+   set_output 'quality-gate-report' "\"${minified_report}\""
    fail "Quality Gate has FAILED.${reset}\n\n${analysisResultMsg}"
 else
    set_output "quality-gate-status" "FAILED"
    fail "Quality Gate not set for the project. Please configure the Quality Gate in SonarQube or remove sonarqube-quality-gate action from the workflow."
 fi
-
